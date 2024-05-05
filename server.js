@@ -8,7 +8,8 @@ const app = express()
 app.use(cors())
 app.use(bodyParser.json());
 
-const pool = mysql.createConnection({
+const pool = mysql.createPool({
+    connectionLimit: 10,
     host: process.env.HOST,
     port: process.env.PORT,
     user: process.env.USER,
@@ -355,28 +356,25 @@ app.post("/transfer", (req, res) => {
 // })
 
 app.get("/rekening", (req, res, next) => {
+    // Get a connection from the pool
     pool.getConnection((err, connection) => {
+      if (err) {
+        return next(err);
+      }
+  
+      // Use the connection to execute the query
+      connection.query("SELECT * FROM Rekening", (err, rows) => {
+        // Release the connection back to the pool
+        connection.release();
+  
         if (err) {
-            return next(err)
+          return next(err);
         }
-
-        connection.query("SELECT * FROM Rekening", (err, rows) => {
-            connection.release()
-
-            // if (err) {
-            //     console.log("Gagal mendapatkan semua rekening", err)
-            //     res.status(500).json({ error: "Internal server error" })
-            //     return
-            // }
-
-            if (err) {
-                return next(err)
-            }
-    
-            res.json(rows)
-        })
-    })
-})
+  
+        res.json(rows);
+      });
+    });
+  });
 
 app.get("/saldo/:id", (req, res) => {
     const rekeningId = req.params.id    
