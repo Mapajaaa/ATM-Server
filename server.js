@@ -3,13 +3,13 @@ const mysql = require('mysql');
 const express = require("express");
 const cors = require('cors')
 const bodyParser = require('body-parser');
+const e = require("express");
 
 const app = express()
 app.use(cors())
 app.use(bodyParser.json());
 
-const pool = mysql.createPool({
-    connectionLimit: 10,
+const pool = mysql.createConnection({
     host: process.env.HOST,
     port: process.env.PORT,
     user: process.env.USER,
@@ -97,7 +97,7 @@ app.post("/rekeningbaru", (req, res) => {
 
         pool.query("SELECT * FROM Rekening WHERE ID = ?", [newAccountId], (err, rows) => {
             if (err) {
-                res.json("Error executing query", err)
+                console.log("Error executing query", err)
                 res.status(500).json({ error: "Internal server error" })
                 return
             }
@@ -117,7 +117,7 @@ app.post("/rekeningbaru", (req, res) => {
     })
 })
 
-app.post("/virtual-account", (req, res) => {
+app.post("/virtual-account-baru", (req, res) => {
     const { Pemilik, NoTelepon, Jenis, Pin } = req.body
 
     if (!(/^\d{10,13}$/).test(NoTelepon)) {
@@ -153,7 +153,7 @@ app.post("/virtual-account", (req, res) => {
     
             pool.query("SELECT * FROM VirtualAccount WHERE ID = ?", [newAccountId], (err, rows) => {
                 if (err) {
-                    res.json("Error executing query", err)
+                    console.log("Error executing query", err)
                     res.status(500).json({ error: "Internal server error" })
                     return
                 }
@@ -168,11 +168,11 @@ app.post("/virtual-account", (req, res) => {
 })
 
 app.post("/setor-tunai", (req, res) => {
-    const { RekeningId, Nominal } = req.body
+    const { RekeningId, Nominal, Pin } = req.body
 
     pool.query("SELECT * FROM Rekening WHERE ID = ?", [RekeningId], (err, rows) => {
         if (err) {
-            res.json("Error executing query", err)
+            console.log("Error executing query", err)
             res.status(500).json({ error: "Internal server error" })
             return
         }
@@ -184,7 +184,12 @@ app.post("/setor-tunai", (req, res) => {
 
         const rekening = rows[0]
 
-        const saldoBaru = rekening.Saldo + Nominal
+        if (rekening.Pin !== Pin) {
+            res.status(403).json({ error: "Pin yang anda masukkan salah" })
+            return
+        }
+
+        const saldoBaru = parseInt(rekening.Saldo)  + parseInt(Nominal)
 
         pool.query("UPDATE Rekening SET Saldo = ? WHERE ID = ?", [ saldoBaru, RekeningId ], (err, result) => {
             if (err) {
@@ -199,10 +204,11 @@ app.post("/setor-tunai", (req, res) => {
 })
 
 app.post("/tarik-tunai", (req, res) => {
-    const { RekeningId, Nominal } = req.body
+    const { RekeningId, Nominal, Pin } = req.body
 
     pool.query("SELECT * FROM Rekening WHERE ID = ?", [RekeningId], (err, rows) => {
         if (err) {
+            console.log(err)
             res.status(500).json({ error: "Internal server error" })
             return
         }
@@ -214,21 +220,74 @@ app.post("/tarik-tunai", (req, res) => {
 
         const rekening = rows[0]
 
-        const saldoBaru = rekening.Saldo - Nominal
+        if (rekening.Pin !== Pin) {
+            res.status(403).json({ error: "Pin yang anda masukkan salah" })
+            return
+        }
 
-        if (saldoBaru < rekening.MinimalSaldo) {
+        const saldoBaru = parseInt(rekening.Saldo) - parseInt(Nominal)
+
+        if (saldoBaru < parseInt(rekening.MinimalSaldo)) {
             res.status(403).json({ error: `Saldo tidak boleh kurang dari Rp.${rekening.MinimalSaldo}` })
             return
         }
 
         pool.query("UPDATE Rekening SET Saldo = ? WHERE ID = ?", [ saldoBaru, RekeningId ], (err, result) => {
             if (err) {
+                console.log(err)
                 res.status(500).json({ error: "Internal server error" })
                 return
             }
 
             res.status(200).json({ message: `Tarik tunai dengan nominal Rp.${Nominal} berhasil`})
         })
+    })
+})
+
+app.post("/cek-rekening", (req, res) => {
+    const { NoKartu, RekId } = req.body
+
+    pool.query("SELECT * FROM Rekening WHERE NoKartu = ?", [NoKartu], (err, rows) => {
+        if (err) {
+            console.log("Error executing query", err)
+            res.status(500).json({ error: "Internal server error" })
+            return
+        }
+
+        if (rows.length === 0) {
+            res.status(404).json({ error: "Rekening tidak ditemukan" })
+            return
+        }
+
+       const rekening = rows[0]
+
+       if (rekening.ID === RekId) {
+        res.status(403).json({ error: "Tidak bisa transfer ke rekening milik sendiri" })
+        return
+       }
+
+       res.json(rekening)
+    })
+})
+
+app.post("/cek-rek", (req, res) => {
+    const { NoKartu } = req.body
+
+    pool.query("SELECT * FROM Rekening WHERE NoKartu = ?", [NoKartu], (err, rows) => {
+        if (err) {
+            console.log("Error executing query", err)
+            res.status(500).json({ error: "Internal server error" })
+            return
+        }
+
+        if (rows.length === 0) {
+            res.status(404).json({ error: "Rekening tidak ditemukan" })
+            return
+        }
+
+       const rekening = rows[0]
+
+       res.json(rekening)
     })
 })
 
@@ -250,7 +309,7 @@ app.post("/transfer", (req, res) => {
         const rekeningPengirim = rows[0]
 
         if (NoRekTujuan === rekeningPengirim.NoKartu) {
-            res.status(400).json({ error: "Tidak bisa transfer ke rekening sendiri"})
+            res.status(400).json({ error: "Tidak bisa transfer ke rekening milik sendiri"})
             return
         }
 
@@ -259,7 +318,7 @@ app.post("/transfer", (req, res) => {
             return
         }
 
-        if (rekeningPengirim.Saldo < Nominal) {
+        if (parseInt(rekeningPengirim.Saldo) < parseInt(Nominal)) {
             res.status(403).json({ error: `Saldo tidak mencukupi` })
             return
         }
@@ -300,9 +359,9 @@ app.post("/transfer", (req, res) => {
                     break;
             }
 
-            const saldoSetelahTransfer = rekeningPengirim.Saldo - Nominal - biayaAdmin
+            const saldoSetelahTransfer = parseInt(rekeningPengirim.Saldo) - parseInt(Nominal) - parseInt(biayaAdmin)
 
-            if (saldoSetelahTransfer < rekeningPengirim.MinimalSaldo) {
+            if (saldoSetelahTransfer < parseInt(rekeningPengirim.MinimalSaldo)) {
                 res.status(403).json({ error: `Saldo tidak boleh kurang dari Rp.${rekeningPengirim.MinimalSaldo}` })
                 return
             }
@@ -314,7 +373,7 @@ app.post("/transfer", (req, res) => {
                     return
                 }
 
-                const saldoPenerima = rekeningPenerima.Saldo + Nominal
+                const saldoPenerima = parseInt(rekeningPenerima.Saldo) + parseInt(Nominal)
 
                 pool.query("UPDATE Rekening SET Saldo = ? WHERE ID = ?", [ saldoPenerima, rekeningPenerima.ID ], (err, result) => {
                     if (err) {
@@ -343,38 +402,29 @@ app.post("/transfer", (req, res) => {
 })
 
 // GET ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-// app.get("/rekening", (req, res) => {
-//     pool.query("SELECT * FROM Rekening", (err, rows) => {
-//         if (err) {
-//             res.json("Gagal mendapatkan semua rekening")
-//             res.status(500).json({ error: "Internal server error" })
-//             return
-//         }
-
-//         res.json(rows)
-//     })
-// })
-
-app.get("/rekening", (req, res, next) => {
-    // Get a connection from the pool
-    pool.getConnection((err, connection) => {
-      if (err) {
-        return next(err);
-      }
-  
-      // Use the connection to execute the query
-      connection.query("SELECT * FROM Rekening", (err, rows) => {
-        // Release the connection back to the pool
-        connection.release();
-  
+app.get("/rekening", (req, res) => {
+    pool.query("SELECT * FROM Rekening", (err, rows) => {
         if (err) {
-          return next(err);
+            console.log("Gagal mendapatkan semua rekening", err)
+            res.status(500).json({ error: "Internal server error" })
+            return
         }
-  
-        res.json(rows);
-      });
-    });
-  });
+
+        res.json(rows)
+    })
+})
+
+app.get("/virtual-account", (req, res) => {
+    pool.query("SELECT * FROM VirtualAccount", (err, rows) => {
+        if (err) {
+            console.log("Gagal mendapatkan semua virtual account", err)
+            res.status(500).json({ error: "Internal server error" })
+            return
+        }
+
+        res.json(rows)
+    })
+})
 
 app.get("/saldo/:id", (req, res) => {
     const rekeningId = req.params.id    
@@ -417,7 +467,7 @@ app.get("/user", (req, res) => {
     })
 })
 
-const PORT = process.env.EXPRESS_PORT || 3000
+const PORT = process.env.EXPRESS_PORT
 app.listen(PORT, () => {
     console.log(`Server running in port ${PORT}`)
 })
