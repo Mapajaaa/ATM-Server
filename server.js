@@ -342,15 +342,39 @@ app.post("/transfer", (req, res) => {
 })
 
 // GET ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-app.get("/rekening", (req, res) => {
-    pool.query("SELECT * FROM Rekening", (err, rows) => {
+// app.get("/rekening", (req, res) => {
+//     pool.query("SELECT * FROM Rekening", (err, rows) => {
+//         if (err) {
+//             res.json("Gagal mendapatkan semua rekening")
+//             res.status(500).json({ error: "Internal server error" })
+//             return
+//         }
+
+//         res.json(rows)
+//     })
+// })
+
+app.get("/rekening", (req, res, next) => {
+    pool.getConnection((err, connection) => {
         if (err) {
-            res.json("Gagal mendapatkan semua rekening")
-            res.status(500).json({ error: "Internal server error" })
-            return
+            return next(err)
         }
 
-        res.json(rows)
+        connection.query("SELECT * FROM Rekening", (err, rows) => {
+            connection.release()
+
+            // if (err) {
+            //     console.log("Gagal mendapatkan semua rekening", err)
+            //     res.status(500).json({ error: "Internal server error" })
+            //     return
+            // }
+
+            if (err) {
+                return next(err)
+            }
+    
+            res.json(rows)
+        })
     })
 })
 
