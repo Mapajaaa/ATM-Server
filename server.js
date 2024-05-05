@@ -395,7 +395,7 @@ app.get("/user", (req, res) => {
     })
 })
 
-const PORT = process.env.EXPRESS_PORT || 3000
+const PORT = process.env.EXPRESS_PORT
 app.listen(PORT, () => {
     console.log(`Server running in port ${PORT}`)
 })
